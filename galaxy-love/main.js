@@ -36,6 +36,11 @@ controls.dampingFactor = 0.05;
 controls.enableZoom = true;
 controls.minDistance = 20;
 controls.maxDistance = 200;
+controls.enablePan = true;
+controls.touches = {
+  ONE: THREE.TOUCH.ROTATE,
+  TWO: THREE.TOUCH.DOLLY_PAN
+};
 
 // Raycaster cho click detection
 const raycaster = new THREE.Raycaster();
@@ -420,10 +425,12 @@ window.addEventListener('mousemove', (event) => {
   }
 });
 
-// Click handler
-window.addEventListener('click', (event) => {
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+function handleImageClick(event) {
+  const clientX = event.clientX || (event.touches && event.touches[0] ? event.touches[0].clientX : event.changedTouches[0].clientX);
+  const clientY = event.clientY || (event.touches && event.touches[0] ? event.touches[0].clientY : event.changedTouches[0].clientY);
+  
+  mouse.x = (clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(clientY / window.innerHeight) * 2 + 1;
   
   raycaster.setFromCamera(mouse, camera);
   const intersects = raycaster.intersectObjects(imageGroup.children, true);
@@ -450,7 +457,41 @@ window.addEventListener('click', (event) => {
       }
     }
   }
-});
+}
+
+let touchStartTime = 0;
+let touchStartPos = { x: 0, y: 0 };
+
+window.addEventListener('click', handleImageClick);
+
+window.addEventListener('touchstart', (event) => {
+  if (event.touches.length === 1) {
+    touchStartTime = Date.now();
+    touchStartPos.x = event.touches[0].clientX;
+    touchStartPos.y = event.touches[0].clientY;
+  }
+}, { passive: true });
+
+window.addEventListener('touchend', (event) => {
+  if (event.changedTouches.length === 1) {
+    const touchEndTime = Date.now();
+    const touchDuration = touchEndTime - touchStartTime;
+    const touchEndPos = {
+      x: event.changedTouches[0].clientX,
+      y: event.changedTouches[0].clientY
+    };
+    
+    const touchDistance = Math.sqrt(
+      Math.pow(touchEndPos.x - touchStartPos.x, 2) + 
+      Math.pow(touchEndPos.y - touchStartPos.y, 2)
+    );
+    
+    if (touchDuration < 300 && touchDistance < 10) {
+      event.preventDefault();
+      handleImageClick(event);
+    }
+  }
+}, { passive: false });
 
 // ========================
 // ANIMATION LOOP
