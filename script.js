@@ -66,18 +66,15 @@ function initPinOverlay(){
     if(code.length < 6){ err.textContent = 'Vui lòng nhập đủ 6 chữ số'; return; }
     if(checkPass(code)){
       overlay.setAttribute('aria-hidden','true');
-      // Clear PIN inputs
       digits.forEach(d=>d.value='');
-      // Unlock the secret button
       if (window.unlockSecret) {
         window.unlockSecret();
       }
-      // Tự động hiển thị lời chúc
-      setTimeout(() => {
-        if (window.showSecretMessage) {
+      if (window.showSecretMessage) {
+        setTimeout(() => {
           window.showSecretMessage();
-        }
-      }, 300);
+        }, 300);
+      }
     } else {
       err.textContent = 'Mật khẩu sai — thử lại nhé';
       digits.forEach(d=>d.classList.add('shake'));
@@ -101,6 +98,8 @@ function initCountdown() {
   const months = document.getElementById('cd-months');
   const days = document.getElementById('cd-days');
   const hours = document.getElementById('cd-hours');
+  const minutesEl = document.getElementById('cd-minutes');
+  const secondsEl = document.getElementById('cd-seconds');
 
   function update() {
     const now = new Date();
@@ -110,28 +109,41 @@ function initCountdown() {
     let monthDiff = now.getMonth() - BIRTH_DATE.getMonth();
     let dayDiff = now.getDate() - BIRTH_DATE.getDate();
     let hourDiff = now.getHours() - BIRTH_DATE.getHours();
-    
-    // Điều chỉnh nếu ngày/tháng hiện tại nhỏ hơn ngày/tháng sinh
+    let minuteDiff = now.getMinutes() - BIRTH_DATE.getMinutes();
+    let secondDiff = now.getSeconds() - BIRTH_DATE.getSeconds();
+    // Điều chỉnh borrow từ giây -> phút -> giờ -> ngày -> tháng -> năm
+    if (secondDiff < 0) {
+      minuteDiff--;
+      secondDiff += 60;
+    }
+
+    if (minuteDiff < 0) {
+      hourDiff--;
+      minuteDiff += 60;
+    }
+
+    if (hourDiff < 0) {
+      dayDiff--;
+      hourDiff += 24;
+    }
+
     if (dayDiff < 0) {
       monthDiff--;
       const lastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
       dayDiff += lastMonth.getDate();
     }
-    
+
     if (monthDiff < 0) {
       yearDiff--;
       monthDiff += 12;
-    }
-    
-    if (hourDiff < 0) {
-      dayDiff--;
-      hourDiff += 24;
     }
     
     years.textContent = yearDiff;
     months.textContent = monthDiff;
     days.textContent = dayDiff;
     hours.textContent = String(hourDiff).padStart(2, '0');
+    if (minutesEl) minutesEl.textContent = String(minuteDiff).padStart(2, '0');
+    if (secondsEl) secondsEl.textContent = String(secondDiff).padStart(2, '0');
   }
   update();
   setInterval(update, 1000);
@@ -148,6 +160,7 @@ function initSecretButton() {
     if (typingId) return;
     msgEl.textContent = '';
     msgEl.style.opacity = '0';
+    msgEl.style.display = 'block';
     let i = 0;
     btn.disabled = true;
     btn.style.transform = 'scale(0.95)';
@@ -179,14 +192,30 @@ function initSecretButton() {
       }
       return;
     }
-    
-    // If already unlocked, show the secret message
-    showSecretMessage();
+
+    // If unlocked, navigate to the galaxy-love page
+    window.location.href = 'galaxy-love/index-galaxy.html';
   });
   
   // Store unlock function globally so PIN overlay can call it
   window.unlockSecret = function() {
     isUnlocked = true;
+    try {
+      btn.textContent = 'Nhấn vào trái tim để thấy điều bất ngờ';
+      btn.classList.remove('muted');
+      btn.style.cursor = 'pointer';
+      btn.setAttribute('aria-label', 'Mở galaxy love');
+    } catch (e) {
+    }
+    try {
+      const heartCanvas = document.getElementById('heartbeat');
+      if (heartCanvas) {
+        heartCanvas.removeEventListener('click', heartCanvas._redirectHandler);
+        heartCanvas._redirectHandler = function() { window.location.href = 'galaxy-love/index-galaxy.html'; };
+        heartCanvas.addEventListener('click', heartCanvas._redirectHandler);
+      }
+    } catch (e) {
+    }
   };
   
   // Store show message function globally so PIN overlay can call it
@@ -199,21 +228,6 @@ function tryPlayMusic() {
   const btn = document.getElementById('btn-music');
   let isPlaying = false;
   
-  async function attempt() {
-    try {
-      await audio.play();
-      isPlaying = true;
-      btn.textContent = 'Tạm dừng';
-      btn.classList.remove('muted');
-    } catch (e) {
-      // Autoplay blocked -> show button to let user start
-      isPlaying = false;
-      btn.textContent = 'Bật nhạc';
-      btn.classList.add('muted');
-    }
-  }
-  attempt();
-  
   btn.addEventListener('click', async () => {
     try {
       if (isPlaying) {
@@ -222,6 +236,8 @@ function tryPlayMusic() {
         btn.textContent = 'Bật nhạc';
         btn.classList.add('muted');
       } else {
+        audio.muted = false;
+        audio.volume = 1;
         await audio.play();
         isPlaying = true;
         btn.textContent = 'Tạm dừng';
@@ -232,7 +248,6 @@ function tryPlayMusic() {
     }
   });
   
-  // Update button state when audio ends or pauses
   audio.addEventListener('pause', () => {
     if (!audio.ended) {
       isPlaying = false;
@@ -338,6 +353,12 @@ function initHeartbeat() {
   const ctx = c.getContext('2d');
   const w = c.width, h = c.height, cx = w / 2, cy = h / 2;
   let t = 0;
+  // overlay text that can be set from elsewhere (e.g. after unlocking)
+  window.heartbeatOverlayText = '';
+  window.setHeartbeatOverlay = function(text) {
+    window.heartbeatOverlayText = text || '';
+    if (c) c.style.cursor = text ? 'pointer' : '';
+  };
   function draw() {
     ctx.clearRect(0, 0, w, h);
     const beat = 1 + Math.abs(Math.sin(t * 2)) * 0.16 + Math.max(0, Math.sin(t * 8)) * 0.06;
@@ -359,6 +380,63 @@ function initHeartbeat() {
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.restore();
+    // draw overlay text if provided
+    if (window.heartbeatOverlayText) {
+      ctx.save();
+      const textX = cx + 50;
+      const textY = cy + 75;
+      ctx.font = '600 17px "Segoe UI", system-ui, sans-serif';
+      const textMetrics = ctx.measureText(window.heartbeatOverlayText);
+      const textWidth = textMetrics.width;
+      const padding = 12;
+      const borderRadius = 16;
+      const boxX = -padding - 20;
+      const boxY = -18;
+      const boxW = textWidth + padding * 2 + 20;
+      const boxH = 36;
+      
+      ctx.translate(textX, textY);
+      
+      ctx.beginPath();
+      ctx.moveTo(boxX + borderRadius, boxY);
+      ctx.lineTo(boxX + boxW - borderRadius, boxY);
+      ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + borderRadius);
+      ctx.lineTo(boxX + boxW, boxY + boxH - borderRadius);
+      ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - borderRadius, boxY + boxH);
+      ctx.lineTo(boxX + borderRadius, boxY + boxH);
+      ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - borderRadius);
+      ctx.lineTo(boxX, boxY + borderRadius);
+      ctx.quadraticCurveTo(boxX, boxY, boxX + borderRadius, boxY);
+      ctx.closePath();
+      
+      const bgGrad = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxH);
+      bgGrad.addColorStop(0, 'rgba(255, 182, 193, 0.95)');
+      bgGrad.addColorStop(1, 'rgba(255, 107, 149, 0.95)');
+      ctx.fillStyle = bgGrad;
+      ctx.shadowColor = 'rgba(255, 107, 149, 0.5)';
+      ctx.shadowBlur = 12;
+      ctx.fill();
+      
+      ctx.beginPath();
+      ctx.moveTo(-20, -8);
+      ctx.lineTo(-8, 0);
+      ctx.lineTo(-20, 8);
+      ctx.closePath();
+      const arrowGrad = ctx.createLinearGradient(-20, -8, -8, 8);
+      arrowGrad.addColorStop(0, '#ff8bb3');
+      arrowGrad.addColorStop(1, '#ff5e78');
+      ctx.fillStyle = arrowGrad;
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(window.heartbeatOverlayText, 0, 5);
+      
+      ctx.restore();
+    }
     t += 0.035;
     requestAnimationFrame(draw);
   }

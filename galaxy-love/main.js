@@ -119,6 +119,25 @@ const imageFiles = [
 let loadedImages = [];
 let selectedImage = null;
 let isZooming = false;
+let isShowingMessage = false;
+let cameraTarget = null;
+let cameraTargetPos = null;
+let cameraStartPos = new THREE.Vector3();
+let cameraStartTarget = new THREE.Vector3();
+let cameraAnimationProgress = 1;
+let imageOriginalRotation = new THREE.Euler();
+let imageOriginalQuaternion = new THREE.Quaternion();
+let imageTargetQuaternion = new THREE.Quaternion();
+let imageOriginalPosition = new THREE.Vector3();
+let imageOriginalScale = new THREE.Vector3(1, 1, 1);
+let isResetting = false;
+let messageZoomProgress = 1;
+let messageZoomStartPos = new THREE.Vector3();
+let messageZoomTargetPos = new THREE.Vector3();
+let resetStartPos = new THREE.Vector3();
+let resetStartTarget = new THREE.Vector3();
+let resetProgress = 1;
+let resetMesh = null;
 
 // Hàm typewriter effect
 function typewriterText(element, text, speed = 50) {
@@ -146,23 +165,29 @@ function createLabel(text, mesh) {
   labelDiv.style.fontSize = '18px';
   labelDiv.style.fontFamily = '"Segoe UI", Arial, sans-serif';
   labelDiv.style.textAlign = 'center';
-  labelDiv.style.background = 'linear-gradient(135deg, rgba(138, 43, 226, 0.9) 0%, rgba(75, 0, 130, 0.9) 100%)';
+  labelDiv.style.background = 'linear-gradient(135deg, rgba(255, 192, 203, 0.95) 0%, rgba(255, 105, 180, 0.95) 100%)';
   labelDiv.style.padding = '12px 20px';
   labelDiv.style.borderRadius = '12px';
-  labelDiv.style.border = '2px solid rgba(255, 255, 255, 0.3)';
-  labelDiv.style.boxShadow = '0 4px 15px rgba(138, 43, 226, 0.5)';
+  labelDiv.style.border = '2px solid rgba(255, 255, 255, 0.5)';
+  labelDiv.style.boxShadow = '0 4px 20px rgba(255, 105, 180, 0.6), 0 0 30px rgba(255, 192, 203, 0.4)';
   labelDiv.style.whiteSpace = 'normal';
-  labelDiv.style.maxWidth = '280px';
-  labelDiv.style.lineHeight = '1.5';
+  labelDiv.style.maxWidth = '320px';
+  labelDiv.style.maxHeight = '180px';
+  labelDiv.style.overflowY = 'auto';
+  labelDiv.style.overflowX = 'hidden';
+  labelDiv.style.lineHeight = '1.4';
   labelDiv.style.pointerEvents = 'none';
   labelDiv.style.opacity = '0';
-  labelDiv.style.transition = 'opacity 0.3s';
+  labelDiv.style.transition = 'opacity 0.5s';
   labelDiv.style.wordWrap = 'break-word';
+  labelDiv.style.position = 'relative';
+  labelDiv.style.top = '0';
+  labelDiv.style.boxSizing = 'border-box';
   
-  mesh.userData.originalText = text; // Lưu text gốc để dùng typewriter
+  mesh.userData.originalText = text;
   
   const label = new CSS2DObject(labelDiv);
-  label.position.set(0, -9.5, 0); // Dưới ảnh
+  label.position.set(0, -10.5, 0);
   mesh.add(label);
   mesh.userData.label = label;
   mesh.userData.labelDiv = labelDiv;
@@ -175,73 +200,117 @@ const imageModal = document.getElementById('imageModal');
 const modalImage = document.getElementById('modalImage');
 const modalMessage = document.getElementById('modalMessage');
 
-// Hàm hiển thị ảnh trong modal
-function showImageModal(mesh) {
+function zoomToImage(mesh) {
   if (isZooming) return;
   isZooming = true;
-  
-  // Sử dụng imageSrc đã lưu hoặc lấy từ texture
-  if (mesh.userData.imageSrc) {
-    modalImage.src = mesh.userData.imageSrc;
-  } else {
-    const texture = mesh.material.map;
-    if (texture && texture.image) {
-      modalImage.src = texture.image.src;
-    }
-  }
-  
-  // Reset message
-  modalMessage.textContent = '';
-  
-  // Hiển thị modal với animation
-  imageModal.classList.add('active');
-  
-  // Làm mờ các ảnh trong scene một chút để không che mất galaxy
-  imageGroup.children.forEach(img => {
-    img.material.opacity = 0.4;
-    img.material.transparent = true;
-  });
-  
-  // Typewriter effect cho message sau khi modal hiện lên
-  setTimeout(() => {
-    typewriterText(modalMessage, mesh.userData.originalText || mesh.userData.message, 30);
-    isZooming = false;
-  }, 400);
-  
   selectedImage = mesh;
+  
+  imageOriginalPosition.copy(mesh.position);
+  imageOriginalRotation.copy(mesh.rotation);
+  imageOriginalQuaternion.copy(mesh.quaternion);
+  imageTargetQuaternion.setFromEuler(new THREE.Euler(0, 0, 0));
+  
+  const worldPos = new THREE.Vector3();
+  mesh.getWorldPosition(worldPos);
+  
+  const normal = new THREE.Vector3(0, 0, 1);
+  normal.applyQuaternion(mesh.quaternion);
+  
+  const cameraToMesh = new THREE.Vector3().subVectors(camera.position, worldPos).normalize();
+  const dot = normal.dot(cameraToMesh);
+  
+  if (dot < 0) {
+    normal.negate();
+  }
+  
+  const distance = 30;
+  const cameraOffset = normal.clone().multiplyScalar(distance);
+  const targetCameraPos = worldPos.clone().add(cameraOffset);
+  
+  cameraStartPos.copy(camera.position);
+  cameraStartTarget.copy(controls.target);
+  cameraTarget = worldPos.clone();
+  cameraTargetPos = targetCameraPos.clone();
+  cameraAnimationProgress = 0;
+  
+  controls.enabled = false;
 }
 
-// Hàm đóng modal
-function closeImageModal() {
-  imageModal.classList.remove('active');
+function resetCamera() {
+  if (!isZooming) return;
   
-  // Khôi phục opacity của các ảnh
-  imageGroup.children.forEach(img => {
-    img.material.opacity = 1;
-  });
+  resetMesh = selectedImage;
+  isResetting = true;
+  resetProgress = 0;
+  resetStartPos.copy(camera.position);
+  resetStartTarget.copy(controls.target);
   
-  // Reset message
-  modalMessage.textContent = '';
-  modalImage.src = '';
-  
-  selectedImage = null;
-  isZooming = false;
+  if (resetMesh) {
+    imageOriginalRotation.copy(resetMesh.rotation);
+    imageOriginalQuaternion.copy(resetMesh.quaternion);
+  }
 }
 
-// Event listeners cho modal
-imageModal.addEventListener('click', (e) => {
-  // Đóng khi click vào background (không phải content)
-  if (e.target === imageModal) {
-    closeImageModal();
+function showMessage(mesh) {
+  if (isShowingMessage) return;
+  isShowingMessage = true;
+  
+  mesh.visible = true;
+  if (mesh.material) {
+    mesh.material.opacity = 1;
+    mesh.material.transparent = true;
   }
-});
+  
+  imageOriginalScale.copy(mesh.scale);
+  messageZoomStartPos.copy(camera.position);
+  
+  const worldPos = new THREE.Vector3();
+  mesh.getWorldPosition(worldPos);
+  
+  const normal = new THREE.Vector3(0, 0, 1);
+  normal.applyQuaternion(mesh.quaternion);
+  
+  const cameraToMesh = new THREE.Vector3().subVectors(camera.position, worldPos).normalize();
+  const dot = normal.dot(cameraToMesh);
+  
+  if (dot < 0) {
+    normal.negate();
+  }
+  
+  const closeDistance = 25;
+  const cameraOffset = normal.clone().multiplyScalar(closeDistance);
+  messageZoomTargetPos.copy(worldPos).add(cameraOffset);
+  
+  messageZoomProgress = 0;
+  
+  const labelDiv = mesh.userData.labelDiv;
+  if (labelDiv) {
+    labelDiv.style.opacity = '1';
+    labelDiv.textContent = '';
+    setTimeout(() => {
+      typewriterText(labelDiv, mesh.userData.originalText || mesh.userData.message, 30);
+    }, 100);
+  }
+}
 
-// Đóng modal bằng phím ESC
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && imageModal.classList.contains('active')) {
-    closeImageModal();
+function hideMessage(mesh) {
+  if (!isShowingMessage) return;
+  isShowingMessage = false;
+  
+  messageZoomProgress = 0;
+  messageZoomStartPos.copy(camera.position);
+  
+  if (cameraTargetPos) {
+    messageZoomTargetPos.copy(cameraTargetPos);
   }
-});
+  
+  const labelDiv = mesh.userData.labelDiv;
+  if (labelDiv) {
+    labelDiv.style.opacity = '0';
+    labelDiv.textContent = '';
+  }
+}
+
 
 // Load tất cả ảnh
 imageFiles.forEach((filename, i) => {
@@ -256,6 +325,7 @@ imageFiles.forEach((filename, i) => {
 
     const geometry = new THREE.PlaneGeometry(12, 16);
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.originalTexture = texture;
     
     // Ảnh trung tâm ở giữa, các ảnh khác xung quanh với độ sâu khác nhau
     if (isCenter) {
@@ -352,11 +422,6 @@ window.addEventListener('mousemove', (event) => {
 
 // Click handler
 window.addEventListener('click', (event) => {
-  // Không xử lý click nếu đang trong modal
-  if (imageModal.classList.contains('active')) {
-    return;
-  }
-  
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   
@@ -366,7 +431,23 @@ window.addEventListener('click', (event) => {
   if (intersects.length > 0) {
     const clickedMesh = intersects[0].object;
     if (clickedMesh.userData.isClickable && !clickedMesh.userData.isHidden) {
-      showImageModal(clickedMesh);
+      if (isZooming && selectedImage === clickedMesh) {
+        if (isShowingMessage) {
+          hideMessage(clickedMesh);
+        } else {
+          showMessage(clickedMesh);
+        }
+      } else {
+        zoomToImage(clickedMesh);
+      }
+    }
+  } else {
+    if (isZooming) {
+      if (isShowingMessage) {
+        hideMessage(selectedImage);
+      } else {
+        resetCamera();
+      }
     }
   }
 });
@@ -377,15 +458,143 @@ window.addEventListener('click', (event) => {
 function animate() {
   requestAnimationFrame(animate);
 
-  // Galaxy xoay nhẹ
+  // Galaxy xoay nhẹ (sempre)
   stars.rotation.y += 0.0005;
 
-  // Ảnh trôi trong không gian (chỉ khi không zoom)
-  if (!isZooming && !selectedImage) {
-    const time = Date.now() * 0.001;
+  // Animação da câmera voando até a imagem
+  if (isZooming && !isResetting && cameraTarget && cameraTargetPos && cameraAnimationProgress < 1) {
+    cameraAnimationProgress += 0.008;
+    if (cameraAnimationProgress > 1) cameraAnimationProgress = 1;
     
-    imageGroup.children.forEach((img, index) => {
-      if (!img.userData.isHidden) {
+    const t = cameraAnimationProgress;
+    const ease = t < 0.5 
+      ? 2 * t * t 
+      : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    
+    camera.position.lerpVectors(cameraStartPos, cameraTargetPos, ease);
+    controls.target.lerpVectors(cameraStartTarget, cameraTarget, ease);
+    
+    if (selectedImage) {
+      const smoothEase = ease;
+      
+      const currentQuat = imageOriginalQuaternion.clone();
+      currentQuat.slerp(imageTargetQuaternion, smoothEase);
+      selectedImage.quaternion.copy(currentQuat);
+      selectedImage.updateMatrixWorld();
+      
+      if (cameraAnimationProgress >= 1) {
+        selectedImage.rotation.set(0, 0, 0);
+        selectedImage.quaternion.copy(imageTargetQuaternion);
+        selectedImage.updateMatrixWorld();
+      }
+    }
+  }
+
+  // Animação zoom in quando mostrar mensagem
+  if (isShowingMessage && selectedImage && messageZoomProgress < 1) {
+    messageZoomProgress += 0.012;
+    if (messageZoomProgress > 1) messageZoomProgress = 1;
+    
+    const t = messageZoomProgress;
+    const ease = t < 0.5 
+      ? 2 * t * t 
+      : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    
+    camera.position.lerpVectors(messageZoomStartPos, messageZoomTargetPos, ease);
+    
+    const targetScale = 1.2;
+    const currentScale = THREE.MathUtils.lerp(1, targetScale, ease);
+    selectedImage.scale.set(currentScale, currentScale, currentScale);
+    
+    if (selectedImage.material) {
+      selectedImage.material.opacity = 1;
+      selectedImage.material.transparent = true;
+      selectedImage.material.map = selectedImage.material.map || selectedImage.userData.originalTexture;
+      if (!selectedImage.userData.originalTexture) {
+        selectedImage.userData.originalTexture = selectedImage.material.map;
+      }
+    }
+    
+    selectedImage.visible = true;
+    selectedImage.updateMatrixWorld();
+  }
+
+  // Animação brilho contínuo quando mensagem está visível
+  if (isShowingMessage && selectedImage && messageZoomProgress >= 1) {
+    if (selectedImage.material) {
+      selectedImage.material.opacity = 1;
+      selectedImage.material.transparent = true;
+      selectedImage.material.map = selectedImage.userData.originalTexture || selectedImage.material.map;
+    }
+    selectedImage.visible = true;
+    selectedImage.updateMatrixWorld();
+  }
+
+  // Animação zoom out quando esconder mensagem
+  if (!isShowingMessage && isZooming && selectedImage && messageZoomProgress < 1) {
+    messageZoomProgress += 0.012;
+    if (messageZoomProgress > 1) messageZoomProgress = 1;
+    
+    const t = messageZoomProgress;
+    const ease = t < 0.5 
+      ? 2 * t * t 
+      : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    
+    camera.position.lerpVectors(messageZoomStartPos, messageZoomTargetPos, ease);
+    
+    const currentScale = THREE.MathUtils.lerp(selectedImage.scale.x, 1, ease);
+    selectedImage.scale.set(currentScale, currentScale, currentScale);
+    
+    if (selectedImage.material) {
+      selectedImage.material.map = selectedImage.userData.originalTexture || selectedImage.material.map;
+      selectedImage.material.opacity = 1;
+      selectedImage.material.transparent = true;
+    }
+    
+    selectedImage.updateMatrixWorld();
+  }
+
+  // Animação zoom out (reset)
+  if (isResetting && resetProgress < 1) {
+    resetProgress += 0.008;
+    if (resetProgress > 1) resetProgress = 1;
+    
+    const t = resetProgress;
+    const ease = t < 0.5 
+      ? 2 * t * t 
+      : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    
+    camera.position.lerpVectors(resetStartPos, cameraStartPos, ease);
+    controls.target.lerpVectors(resetStartTarget, cameraStartTarget, ease);
+    
+    if (resetMesh) {
+      const smoothEase = ease;
+      const currentQuat = imageTargetQuaternion.clone();
+      currentQuat.slerp(imageOriginalQuaternion, smoothEase);
+      resetMesh.quaternion.copy(currentQuat);
+    }
+    
+    if (resetProgress >= 1) {
+      isZooming = false;
+      isShowingMessage = false;
+      isResetting = false;
+      controls.enabled = true;
+      
+      if (resetMesh && resetMesh.userData.labelDiv) {
+        resetMesh.userData.labelDiv.style.opacity = '0';
+      }
+      
+      selectedImage = null;
+      resetMesh = null;
+      cameraAnimationProgress = 1;
+    }
+  }
+
+  // Ảnh trôi trong không gian (sempre, exceto a imagem selecionada)
+  const time = Date.now() * 0.001;
+  
+  imageGroup.children.forEach((img, index) => {
+    if (!img.userData.isHidden && img !== selectedImage) {
         // Ảnh trung tâm xoay tại chỗ
         if (img.userData.isCenter) {
           img.rotation.y += img.userData.speed;
@@ -432,9 +641,10 @@ function animate() {
         }
       }
     });
-  }
 
-  controls.update();
+  if (!isZooming || cameraAnimationProgress >= 1) {
+    controls.update();
+  }
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
 }
@@ -450,4 +660,62 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   labelRenderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// ---------- Galaxy music autoplay ----------
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const galaxyAudioEl = document.getElementById('galaxy-music');
+    if (!galaxyAudioEl) return;
+
+    const filename = 'nhạc galaxy.m4a';
+    const candidates = [
+      '../assets-galaxy/' + filename,
+      '../assets/' + filename
+    ];
+    
+    for (const p of candidates) {
+      try {
+        const res = await fetch(p, { method: 'HEAD' });
+        if (res.ok) {
+          galaxyAudioEl.src = p;
+          break;
+        }
+      } catch (e) {
+      }
+    }
+
+    galaxyAudioEl.volume = 0.7;
+    galaxyAudioEl.muted = false;
+
+    async function tryPlay() {
+      try {
+        await galaxyAudioEl.play();
+      } catch (e) {
+        galaxyAudioEl.muted = true;
+        try {
+          await galaxyAudioEl.play();
+          setTimeout(() => {
+            galaxyAudioEl.muted = false;
+            galaxyAudioEl.play().catch(() => {});
+          }, 500);
+        } catch (e2) {
+          const playOnInteraction = () => {
+            galaxyAudioEl.muted = false;
+            galaxyAudioEl.play().catch(() => {});
+            document.removeEventListener('click', playOnInteraction);
+            document.removeEventListener('touchstart', playOnInteraction);
+            document.removeEventListener('keydown', playOnInteraction);
+          };
+          document.addEventListener('click', playOnInteraction, { once: true });
+          document.addEventListener('touchstart', playOnInteraction, { once: true });
+          document.addEventListener('keydown', playOnInteraction, { once: true });
+        }
+      }
+    }
+
+    await tryPlay();
+  } catch (e) {
+  }
+});
+
 

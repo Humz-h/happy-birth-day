@@ -136,6 +136,7 @@ h2 {
 }
 
 .message {
+  display: none;
   min-height: 56px;
   margin: 20px 0;
   color: #333;
